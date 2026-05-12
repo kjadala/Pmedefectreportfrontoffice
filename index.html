@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PME Bug Analysis · TFS Front Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f3f4f7;
+    --surface: #ffffff;
+    --surface-2: #f9fafb;
+    --border: #e0e4ea;
+    --border-bright: #cdd3dc;
+    --text: #111827;
+    --text-dim: #4b5563;
+    --text-faint: #9ca3af;
+    --accent: #0891b2;
+    --accent-dim: rgba(8,145,178,0.07);
+    --crit: #dc2626;
+    --high: #d97706;
+    --med:  #0891b2;
+    --low:  #6b7280;
+    --good: #16a34a;
+    --warn: #ca8a04;
+    --violet: #7c3aed;
+    --pink: #db2777;
+    --lime: #4d7c0f;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-weight: 400;
+    line-height: 1.5;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at 0% 0%, rgba(8,145,178,0.04) 0, transparent 40%),
+      radial-gradient(circle at 100% 0%, rgba(217,119,6,0.03) 0, transparent 40%);
+    background-attachment: fixed;
+  }
+
+  .mono { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'ss01'; }
+
+  /* ===== HEADER ===== */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 28px 40px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+    background: rgba(243,244,247,0.88);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header .brand { display: flex; flex-direction: column; gap: 6px; }
+  header .brand .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header .brand .eyebrow::before {
+    content: ''; width: 6px; height: 6px; background: var(--accent);
+    box-shadow: 0 0 8px rgba(8,145,178,0.4);
+  }
+  header h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 28px;
+    letter-spacing: -0.02em;
+    color: var(--text);
+  }
+  header h1 .accent { color: var(--accent); }
+  header .meta {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text-dim);
+  }
+  header .meta strong { color: var(--text); font-weight: 600; }
+
+  main { padding: 40px; max-width: 1600px; margin: 0 auto; }
+
+  /* ===== KPI GRID ===== */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 48px;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .kpi::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.7;
+  }
+  .kpi.crit::before { background: linear-gradient(90deg, transparent, var(--crit), transparent); }
+  .kpi.warn::before { background: linear-gradient(90deg, transparent, var(--high), transparent); }
+  .kpi.good::before { background: linear-gradient(90deg, transparent, var(--good), transparent); }
+  .kpi .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .kpi .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 32px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .kpi .value .unit { font-size: 14px; color: var(--text-dim); margin-left: 4px; font-weight: 400; }
+  .kpi .sub {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .kpi.crit .value { color: var(--crit); }
+  .kpi.warn .value { color: var(--high); }
+
+  /* ===== SECTIONS ===== */
+  .section { margin-bottom: 56px; }
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-head .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    padding: 4px 10px;
+    background: var(--accent-dim);
+    border: 1px solid rgba(8,145,178,0.25);
+  }
+  .section-head h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .section-head .desc {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-left: auto;
+    max-width: 480px;
+    text-align: right;
+  }
+
+  /* ===== CARDS ===== */
+  .grid { display: grid; gap: 14px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-2x { grid-template-columns: 2fr 1fr; }
+  .grid-3x { grid-template-columns: 1fr 1fr 2fr; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 20px 22px;
+    position: relative;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .card-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 16px;
+  }
+  .card-head h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.01em;
+  }
+  .card-head .tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.1em;
+  }
+  .chart-wrap { position: relative; height: 260px; }
+  .chart-wrap.tall { height: 340px; }
+  .chart-wrap.short { height: 200px; }
+
+  /* ===== TABLE ===== */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table th, table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  table th {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-faint);
+    font-weight: 500;
+  }
+  table td { color: var(--text-dim); }
+  table td.id { color: var(--accent); }
+  table td.title { color: var(--text); font-family: 'Manrope', sans-serif; font-size: 13px; }
+  table tr:hover td { background: rgba(0,0,0,0.02); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid var(--border-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .badge.crit { color: var(--crit); border-color: rgba(220,38,38,0.3); background: rgba(220,38,38,0.06); }
+  .badge.high { color: var(--high); border-color: rgba(217,119,6,0.3); background: rgba(217,119,6,0.06); }
+  .badge.med  { color: var(--med);  border-color: rgba(8,145,178,0.3);  background: rgba(8,145,178,0.06); }
+  .badge.low  { color: var(--low);  border-color: rgba(107,114,128,0.3); background: rgba(107,114,128,0.06); }
+  .badge.ext  { color: var(--violet); border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.06); }
+  .badge.int  { color: var(--lime); border-color: rgba(77,124,15,0.3); background: rgba(77,124,15,0.06); }
+
+  /* ===== HEATMAP ===== */
+  .heatmap {
+    display: grid;
+    gap: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  .heat-row { display: grid; gap: 2px; align-items: center; }
+  .heat-label { color: var(--text-dim); padding: 8px 12px 8px 0; text-align: right; font-size: 11px; }
+  .heat-cell {
+    padding: 10px 8px;
+    text-align: center;
+    color: var(--text);
+    font-weight: 500;
+    transition: transform 0.15s;
+  }
+  .heat-cell:hover { transform: scale(1.05); z-index: 2; }
+  .heat-header { color: var(--text-faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; padding: 4px 0; text-align: center; }
+
+  /* ===== METHODOLOGY ===== */
+  .methodology {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 28px;
+    margin-top: 40px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .methodology h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: 18px;
+    letter-spacing: 0.05em;
+  }
+  .methodology ul { list-style: none; padding: 0; }
+  .methodology li {
+    padding: 10px 0 10px 24px;
+    border-bottom: 1px dotted var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+    position: relative;
+  }
+  .methodology li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .methodology li:last-child { border-bottom: none; }
+  .methodology li strong { color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+
+  footer {
+    padding: 30px 40px;
+    border-top: 1px solid var(--border);
+    margin-top: 60px;
+    text-align: center;
+    color: var(--text-faint);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+
+  /* responsive */
+  @media (max-width: 1100px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .grid-3, .grid-4, .grid-3x { grid-template-columns: 1fr 1fr; }
+    .grid-2x { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 720px) {
+    main, header { padding: 20px; }
+    .kpi-grid, .grid-2, .grid-3, .grid-4, .grid-2x, .grid-3x { grid-template-columns: 1fr; }
+    header h1 { font-size: 22px; }
+    .section-head .desc { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="eyebrow">TFS · Front Office · PowerBI Export</span>
+    <h1>PME Bug Analysis <span class="accent">/</span> Engineering Dashboard</h1>
+  </div>
+  <div class="meta">
+    <div>Coverage <strong id="meta-range">—</strong></div>
+    <div>Total tickets <strong id="meta-total">—</strong> · Generated <strong id="meta-now">—</strong></div>
+  </div>
+</header>
+
+<main>
+
+  <!-- KPI HERO -->
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">Total PME Bugs</div><div class="value" id="kpi-total">—</div><div class="sub">across all programs &amp; releases</div></div>
+    <div class="kpi good"><div class="label">Closed</div><div class="value" id="kpi-closed">—<span class="unit" id="kpi-closed-pct"></span></div><div class="sub">resolved &amp; verified</div></div>
+    <div class="kpi warn"><div class="label">Open Backlog</div><div class="value" id="kpi-open">—</div><div class="sub" id="kpi-open-sub">in flight / unstarted</div></div>
+    <div class="kpi crit"><div class="label">Critical · Sev 1</div><div class="value" id="kpi-crit">—</div><div class="sub" id="kpi-high-sub">high-severity defects</div></div>
+    <div class="kpi"><div class="label">Median Resolution</div><div class="value" id="kpi-median">—<span class="unit">days</span></div><div class="sub">across closed defects</div></div>
+    <div class="kpi warn"><div class="label">Customer-Discovered</div><div class="value" id="kpi-cust">—<span class="unit" id="kpi-cust-pct"></span></div><div class="sub">found by clients in prod</div></div>
+    <div class="kpi crit"><div class="label">Escape Defects</div><div class="value" id="kpi-escape">—</div><div class="sub" id="kpi-escape-sub">slipped past QA</div></div>
+    <div class="kpi"><div class="label">Oldest Open</div><div class="value" id="kpi-oldest">—<span class="unit">days</span></div><div class="sub">aging risk in backlog</div></div>
+  </div>
+
+  <!-- SECTION 1: VOLUME OVER TIME -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">01</span>
+      <h2>Volume Trends</h2>
+      <span class="desc">Inflow vs outflow over time. Crossover points show when a release wave or program kick-off generated bug spikes.</span>
+    </div>
+    <div class="grid grid-2x">
+      <div class="card">
+        <div class="card-head"><h3>Created vs Closed · Monthly</h3><span class="tag">2019 – 2026</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-monthly"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Yearly Volume</h3><span class="tag">stacked</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-yearly"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 2: SEVERITY · PRIORITY · STATE -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">02</span>
+      <h2>Severity, Priority &amp; Lifecycle</h2>
+      <span class="desc">Three views of how the portfolio is classified — operational severity, business priority, and workflow state.</span>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-head"><h3>Severity</h3><span class="tag">all</span></div>
+        <div class="chart-wrap"><canvas id="ch-severity"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Priority</h3><span class="tag">P1 – P4</span></div>
+        <div class="chart-wrap"><canvas id="ch-priority"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Workflow State</h3><span class="tag">snapshot</span></div>
+        <div class="chart-wrap"><canvas id="ch-state"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 3: RESOLUTION TIME -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">03</span>
+      <h2>Resolution Time Analysis</h2>
+      <span class="desc">How long defects stay open. Higher-severity bugs are closed faster, but the long tail still drags annual averages.</span>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-head"><h3>Median Days by Severity</h3><span class="tag">closed</span></div>
+        <div class="chart-wrap"><canvas id="ch-res-sev"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Median Days by Close Year</h3><span class="tag">trend</span></div>
+        <div class="chart-wrap"><canvas id="ch-res-year"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Resolution Distribution</h3><span class="tag">buckets</span></div>
+        <div class="chart-wrap"><canvas id="ch-res-dist"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 4: PROGRAM HOT SPOTS -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">04</span>
+      <h2>Program Hot Spots</h2>
+      <span class="desc">Which areas of the codebase generate the most defects. Resident Portals and Marketing Suite dominate inflow.</span>
+    </div>
+    <div class="grid grid-2x">
+      <div class="card">
+        <div class="card-head"><h3>Bugs by Program</h3><span class="tag">AreaLevel2</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-program"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Business Unit Split</h3><span class="tag">AreaLevel1</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-bu"></canvas></div>
+      </div>
+    </div>
+    <div style="margin-top: 14px;">
+      <div class="card">
+        <div class="card-head"><h3>Severity × Program · Top 10</h3><span class="tag">heatmap</span></div>
+        <div id="heatmap" class="heatmap" style="margin-top: 12px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 5: ROOT CAUSE ANALYSIS -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">05</span>
+      <h2>Root Cause Analysis</h2>
+      <span class="desc">Four lenses on why bugs occur: overall RCA, dev-side cause, QA-process gap, and defect category. Cross-reference for patterns.</span>
+    </div>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-head"><h3>Top RCA</h3><span class="tag">RCA field</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-rca"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Development RCA</h3><span class="tag">DevRCA</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-devrca"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>QA RCA</h3><span class="tag">QARCA</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-qarca"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Defect Category</h3><span class="tag">DefectRCA</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-defectrca"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 6: PME CLASSIFICATION + CLIENT IMPACT -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">06</span>
+      <h2>PME Classification &amp; Client Impact</h2>
+      <span class="desc">Internal vs external bug sources, top reporting clients, environment-of-discovery, and discovery channel.</span>
+    </div>
+    <div class="grid grid-4">
+      <div class="card">
+        <div class="card-head"><h3>PME Class</h3><span class="tag">tags</span></div>
+        <div class="chart-wrap"><canvas id="ch-pme-class"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Discovered By</h3><span class="tag">channel</span></div>
+        <div class="chart-wrap"><canvas id="ch-discovery"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Environment Found</h3><span class="tag">env</span></div>
+        <div class="chart-wrap"><canvas id="ch-env"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Fix Type</h3><span class="tag">resolution</span></div>
+        <div class="chart-wrap"><canvas id="ch-fixtype"></canvas></div>
+      </div>
+    </div>
+    <div style="margin-top: 14px;">
+      <div class="card">
+        <div class="card-head"><h3>Top Reporting Clients</h3><span class="tag">parsed from tags</span></div>
+        <div class="chart-wrap tall"><canvas id="ch-clients"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 7: OPEN BACKLOG RISK -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">07</span>
+      <h2>Open Backlog Risk</h2>
+      <span class="desc">Where the 247 open defects sit in the workflow, how old they are, and which high-severity items need attention now.</span>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-head"><h3>Open by State</h3><span class="tag">workflow</span></div>
+        <div class="chart-wrap"><canvas id="ch-open-state"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Open by Severity</h3><span class="tag">risk</span></div>
+        <div class="chart-wrap"><canvas id="ch-open-sev"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Open by Age</h3><span class="tag">aging</span></div>
+        <div class="chart-wrap"><canvas id="ch-open-age"></canvas></div>
+      </div>
+    </div>
+    <div style="margin-top: 14px;">
+      <div class="card">
+        <div class="card-head"><h3>Highest-Risk Open Defects</h3><span class="tag">Critical &amp; High · sorted by age</span></div>
+        <table id="tbl-priority-open" style="margin-top: 8px;"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 8: QUALITY SIGNALS -->
+  <section class="section">
+    <div class="section-head">
+      <span class="num">08</span>
+      <h2>Quality Signals</h2>
+      <span class="desc">Escape defects, resolved reasons, and the slowest-to-close historical bugs.</span>
+    </div>
+    <div class="grid grid-3">
+      <div class="card">
+        <div class="card-head"><h3>Escape Defect</h3><span class="tag">yes / no</span></div>
+        <div class="chart-wrap"><canvas id="ch-escape"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Resolved Reason</h3><span class="tag">outcome</span></div>
+        <div class="chart-wrap"><canvas id="ch-resolved"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>PI Distribution</h3><span class="tag">recent iterations</span></div>
+        <div class="chart-wrap"><canvas id="ch-pi"></canvas></div>
+      </div>
+    </div>
+    <div style="margin-top: 14px;">
+      <div class="card">
+        <div class="card-head"><h3>Top 10 Slowest Resolutions · Closed</h3><span class="tag">long-running tickets</span></div>
+        <table id="tbl-slow" style="margin-top: 8px;"></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 9: METHODOLOGY -->
+  <section class="section">
+    <div class="methodology">
+      <h3>· METHODOLOGY · LOGICS APPLIED TO THE DATA</h3>
+      <ul>
+        <li><strong>SCOPE</strong> &nbsp; All 7,772 rows in <span class="mono">WorkItems</span>. Every row has <span class="mono">WorkItemType = Bug</span> — this is a pure bug dataset, not a mixed work-item export.</li>
+        <li><strong>PME IDENTIFICATION</strong> &nbsp; A ticket is considered PME if (a) its title matches the regex <span class="mono">PME[\s\-]?\d+</span>, or (b) any of its semicolon-delimited <span class="mono">Tags</span> contain "PME". 99.3% of titles match the regex; the remaining 54 are PME-tagged variants.</li>
+        <li><strong>INTERNAL vs EXTERNAL</strong> &nbsp; Derived from <span class="mono">Tags</span>: presence of "External PME" → External, "Internal PME" → Internal, else Unclassified. External outnumber Internal ~4:1, confirming this is a customer-facing defect queue.</li>
+        <li><strong>CLIENT EXTRACTION</strong> &nbsp; Tag tokens that are fully uppercase and longer than 5 characters (excluding generic markers like PME, PME_OSM, P1-P5, BLOCKED) are treated as client names. Greystar, ConAm and Camden lead the report volume.</li>
+        <li><strong>PME PRIORITY</strong> &nbsp; Parsed from <span class="mono">Tags</span> when a P1–P5 token is present, separately from the workflow <span class="mono">Priority</span> field which is the Azure DevOps numeric priority.</li>
+        <li><strong>OPEN vs CLOSED</strong> &nbsp; A ticket is "Closed" if <span class="mono">State</span> contains "Closed" (covers "Closed" and "Closed-New Story"). All other states — New, Ready To Work, Active, Resolved, Defined, Test in Progress, Pending More Info, Rework — count as open backlog.</li>
+        <li><strong>RESOLUTION TIME</strong> &nbsp; <span class="mono">ClosedDate − CreatedDate</span> in days, computed only for closed tickets. Median is used as the headline metric because the distribution is heavily right-skewed (max &gt; 1,600 days drags the mean).</li>
+        <li><strong>AGE OF OPEN</strong> &nbsp; <span class="mono">today() − CreatedDate</span> for tickets still in any open state. The oldest open ticket is 2,300+ days old (2019 vintage), flagging stale backlog.</li>
+        <li><strong>ESCAPE DEFECTS</strong> &nbsp; Computed from the explicit <span class="mono">EscapeDefect</span> field where it is filled (Yes / No). Escape rate is the share of "Yes" out of (Yes+No), ignoring the unclassified majority.</li>
+        <li><strong>CUSTOMER-DISCOVERED</strong> &nbsp; <span class="mono">DiscoveredBy = "Customer"</span>. This is the strongest external-quality signal — &gt;80% of all PME bugs were reported by clients rather than caught internally.</li>
+        <li><strong>FOUR-WAY RCA</strong> &nbsp; The dataset captures four independent RCA dimensions: <span class="mono">RCA</span> (high-level), <span class="mono">DevRCA</span>, <span class="mono">QARCA</span>, and <span class="mono">DefectRCA</span>. Each is plotted separately to expose orthogonal patterns — e.g. <em>incorrect logic</em> dominates DevRCA while <em>not identified in impact analysis</em> leads QARCA.</li>
+        <li><strong>PROGRAM HIERARCHY</strong> &nbsp; <span class="mono">AreaLevel1</span> = Business Unit (Consumer Solutions vs FinServ), <span class="mono">AreaLevel2</span> = Program. The full <span class="mono">AreaPath</span> backslash-delimited string is preserved in the source data for drill-down.</li>
+        <li><strong>TIME COHORTS</strong> &nbsp; Monthly cohorts pivot on <span class="mono">CreatedDate</span> and <span class="mono">ClosedDate</span> separately so created-vs-closed crossover reveals whether the team is burning down or accumulating backlog in a given month.</li>
+        <li><strong>HEATMAP</strong> &nbsp; <span class="mono">Severity × Program</span> crosstab, top 10 programs by total volume. Cell colour intensity is proportional to count, log-scaled so the Resident Portals cluster doesn't wash out smaller programs.</li>
+        <li><strong>PRIVACY · PII REDACTION</strong> &nbsp; Individual engineer / assignee names have been removed from this dashboard. The original Excel still contains <span class="mono">AssignedTo</span>, <span class="mono">CreatedBy</span>, <span class="mono">ResolvedBy</span> and similar fields for internal use, but they are not visualised here. Corporate client names parsed from <span class="mono">Tags</span> are retained as they are entity-level identifiers rather than personal data.</li>
+        <li><strong>DATA HYGIENE</strong> &nbsp; NaN values are kept visible (as "Unspecified") in RCA charts because the absence of an RCA classification is itself an interesting signal — over 50% of tickets have no Dev/QA RCA captured.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div>PME BUG ANALYSIS · GENERATED FROM <span class="mono">tfs_front_office_powerbi.xlsx</span> · DEPLOYABLE TO GITHUB PAGES</div>
+</footer>
+
+<script>
+const DATA = {"kpis":{"total":7772,"closed":7525,"closed_pct":96.8,"open":247,"critical":34,"high":711,"escape_yes":49,"escape_rate":14.0,"customer_discovered":6284,"customer_pct":80.9,"median_res_days":14.7,"mean_res_days":56.9,"oldest_open_days":2383,"external_pme":4557,"internal_pme":1092,"production_found":7295,"production_pct":93.9,"date_min":"2017-11-30","date_max":"2026-05-12"},"timeseries_monthly":{"labels":["2019-01","2019-02","2019-03","2019-04","2019-05","2019-06","2019-07","2019-08","2019-09","2019-10","2019-11","2019-12","2020-01","2020-02","2020-03","2020-04","2020-05","2020-06","2020-07","2020-08","2020-09","2020-10","2020-11","2020-12","2021-01","2021-02","2021-03","2021-04","2021-05","2021-06","2021-07","2021-08","2021-09","2021-10","2021-11","2021-12","2022-01","2022-02","2022-03","2022-04","2022-05","2022-06","2022-07","2022-08","2022-09","2022-10","2022-11","2022-12","2023-01","2023-02","2023-03","2023-04","2023-05","2023-06","2023-07","2023-08","2023-09","2023-10","2023-11","2023-12","2024-01","2024-02","2024-03","2024-04","2024-05","2024-06","2024-07","2024-08","2024-09","2024-10","2024-11","2024-12","2025-01","2025-02","2025-03","2025-04","2025-05","2025-06","2025-07","2025-08","2025-09","2025-10","2025-11","2025-12","2026-01","2026-02","2026-03","2026-04","2026-05","2026-06","2026-07","2026-08","2026-09","2026-10","2026-11","2026-12"],"created":[0,1,0,1,2,7,18,18,13,49,55,38,48,47,46,55,78,95,75,66,77,120,120,104,112,118,179,201,202,217,152,190,137,99,89,103,101,123,114,105,104,94,102,124,101,80,108,95,110,132,113,81,121,95,98,103,71,71,70,62,71,78,70,81,78,79,90,112,90,85,80,59,85,69,79,70,63,80,91,75,68,80,70,64,78,136,128,194,57,0,0,0,0,0,0,0],"closed":[0,0,0,0,0,0,0,0,0,0,0,2,4,8,10,7,31,26,221,254,93,109,83,80,102,105,167,159,214,240,151,160,168,143,118,95,99,116,130,105,104,86,82,105,93,72,90,79,121,126,145,95,99,190,92,89,61,61,112,52,69,65,70,75,81,69,87,96,89,85,76,55,83,55,74,65,49,85,93,71,81,109,99,52,65,102,151,130,67,0,0,0,0,0,0,0]},"timeseries_yearly":{"labels":["2017","2018","2019","2020","2021","2022","2023","2024","2025","2026"],"created":[1,1,202,931,1799,1251,1127,973,894,593],"closed":[0,0,2,926,1822,1161,1243,917,916,515]},"severity":{"labels":["3 - Medium","2 - High","4 - Low","1 - Critical","Unspecified"],"values":[6701,711,294,34,32]},"priority":{"labels":["Unspecified","P1","P2","P3","P4"],"values":[3,136,1070,6246,317]},"state":{"labels":["Closed","New","Ready To Work","Active","Resolved","Closed-New Story","Defined","Test in Progress","Pending More Info","Rework"],"values":[7502,95,47,36,32,23,12,11,11,3]},"res_by_severity":{"labels":["1 - Critical","2 - High","3 - Medium","4 - Low"],"median":[3.4,5.5,15.2,69.1],"mean":[25.8,28.6,55.4,169.1],"count":[34,680,6489,270]},"res_by_year":{"labels":["2019","2020","2021","2022","2023","2024","2025","2026"],"median":[35.8,55.1,9.8,6.0,13.7,11.9,24.9,21.9],"mean":[35.8,99.5,33.4,30.3,72.3,32.3,102.1,49.3],"count":[2,926,1822,1161,1243,917,916,515]},"res_distribution":[{"label":"< 1 day","value":1492},{"label":"1-7 days","value":1387},{"label":"1-2 weeks","value":794},{"label":"2-4 weeks","value":1168},{"label":"1-3 months","value":1514},{"label":"3-6 months","value":579},{"label":"6-12 months","value":372},{"label":"> 1 year","value":196}],"program":{"labels":["Resident Portals Program","Marketing Suite Program","Leasing Program","Screening Program","Screening Program Pre 2022","Lead Management Program","Integrated Front Office BU","Unspecified","RPCC","Ellipse","Centralized Processing","LD Screening"],"values":[2308,1792,1438,744,707,291,283,110,66,20,12,1]},"business_unit":{"labels":["Consumer Solutions","FinServ"],"values":[7058,714]},"rca":{"labels":["Client-Side Customizations\u200b","Data Fix\u200b","Escape Defect","Known Issue \u200b","GAP","Environment Related\u200b","Performance Issue\u200b","Compliance\u200b"],"values":[854,684,459,412,412,339,78,66]},"dev_rca":{"labels":["Incorrect logic","No Code Change","Data Fix","Design or technical requirements lacking","Insufficient impact analysis"],"values":[400,220,179,99,44]},"qa_rca":{"labels":["Not identified in impact analysis","Type of test not included in test plan","Configuration change","Missed during test execution","Insufficient test coverage","Insufficient test plan"],"values":[362,188,103,96,82,29]},"defect_rca":{"labels":["Code issue","Data","Not an issue","Configuration","Ambiguous requirements","New Requirement","Design","Environment","Architecture","IT/Infrastructure"],"values":[344,164,115,62,32,31,28,15,9,8]},"fix_type":{"labels":["Other","Code Fix","Data Fix","Config Fix","IT Fix"],"values":[1944,1399,775,120,43]},"discovery":{"labels":["Customer","Internal PME","Product","Development","Support","QA-Functional","InfoSec","InfoSec-Tenable","QA-Regression","InfoSec-Fortify"],"values":[6284,803,134,67,31,22,15,10,7,4]},"environment":{"labels":["Production","SAT","Dev","UAT","Preprod","QA","PRODUCTION","Demo"],"values":[7295,49,11,10,9,5,2,1]},"resolved_reason":{"labels":["Fixed and verified","Fixed","Finished","Cannot Reproduce","As Designed","Deferred","Obsolete","Duplicate","Done","Copied to Backlog"],"values":[4011,2587,141,71,69,29,24,20,16,1]},"pme_class":{"labels":["External","Unclassified","Internal"],"values":[4557,2123,1092]},"top_clients":{"labels":["Greystar Management Services Lp","Conam Management Corporation","Lyon Management Group Inc. D/B/A Lyon Li","Camden Development Inc.","Fpi Management","D.R. Horton Inc","D.P. Preiss Company Inc Dba The Preiss C","Blue Ridge Property Management Llc","Realpage - General Account","Clk Multi-Family Management Llc","Uag Ventures Ac L.P. Dba United Apartmen","Greystar Management Services Llc","Knightvest Management Llc","Thrive Communities Management Llc Dba Th","Truamerica Multifamily Llc"],"values":[311,265,84,77,72,57,47,45,45,44,42,40,36,35,32]},"open_backlog":{"state":{"labels":["New","Ready To Work","Active","Resolved","Defined","Test in Progress","Pending More Info","Rework"],"values":[95,47,36,32,12,11,11,3]},"severity":{"labels":["3 - Medium","2 - High","4 - Low","Unspecified"],"values":[200,27,17,3]},"age":[{"label":"< 1 week","value":32},{"label":"1-4 weeks","value":116},{"label":"1-3 months","value":34},{"label":"3-6 months","value":3},{"label":"6-12 months","value":4},{"label":"1-2 years","value":3},{"label":"> 2 years","value":55}]},"escape":{"labels":["No","Yes"],"values":[302,49]},"pi_distribution":{"labels":["PI 23.Q1","PI 23.Q2","PI 24.Q1","PI 24.Q2","PI 24.Q3","PI 24.Q4","PI 25.Q1","PI 25.Q2","PI 25.Q3","PI 25.Q4","PI 26.Q1","PI 26.Q2"],"values":[26,23,171,226,230,215,193,192,178,205,243,377]},"heatmap":{"rows":["Resident Portals Program","Marketing Suite Program","Leasing Program","Screening Program","Screening Program Pre 2022","Lead Management Program","Integrated Front Office BU","Unspecified","RPCC","Ellipse"],"cols":["1 - Critical","2 - High","3 - Medium","4 - Low","Unspecified"],"values":[[6,125,2128,43,6],[10,185,1426,170,1],[9,90,1293,36,10],[3,161,562,14,4],[1,54,646,6,0],[4,42,229,16,0],[1,45,221,6,10],[0,2,108,0,0],[0,7,55,3,1],[0,0,20,0,0]]},"priority_open_table":[{"id":930233,"title":"PME-240618 - Unable to download prospect and referrer data","severity":"2 - High","state":"New","assigned":"Unassigned","age_days":1721,"pme_class":"External","program":"Lead Management Program"},{"id":1127966,"title":"P2 : SF : PME-273732 - New Website Themes not working right","severity":"2 - High","state":"Ready To Work","assigned":"Assigned","age_days":1489,"pme_class":"External","program":"Marketing Suite Program"},{"id":1150653,"title":"PME-273023 - Unable to send text messages and validate ID","severity":"2 - High","state":"New","assigned":"Unassigned","age_days":1456,"pme_class":"External","program":"Lead Management Program"},{"id":1285513,"title":"PME-289086 - Site map not showing on the Leasing Tablet App","severity":"2 - High","state":"New","assigned":"Unassigned","age_days":1316,"pme_class":"External","program":"Lead Management Program"},{"id":2135001,"title":"PME-411101 - Onesite does not receive the Guest Card and Quotes submitted","severity":"2 - High","state":"New","assigned":"Unassigned","age_days":518,"pme_class":"Internal","program":"Lead Management Program"},{"id":2806851,"title":"P2 - PME-500459 - UAT Environment - Deleted Concessions Still Reflecting on Online Leasing","severity":"2 - High","state":"Resolved","assigned":"Assigned","age_days":42,"pme_class":"External","program":"Leasing Program"},{"id":2812870,"title":"PME-502775 - Cannot Generate PDF quotes for The Preserve in Knock","severity":"2 - High","state":"Resolved","assigned":"Unassigned","age_days":38,"pme_class":"External","program":"Integrated Front Office BU"},{"id":2823482,"title":"PME-503798 - ENGREQ: Not Receiving All of the Leads Being Generated on StreetEasy","severity":"2 - High","state":"Resolved","assigned":"Assigned","age_days":31,"pme_class":"External","program":"Integrated Front Office BU"},{"id":2827792,"title":"PME-502875 - Property Mapping Error - PMC and Site Combination Not Found in Partner System","severity":"2 - High","state":"Defined","assigned":"Unassigned","age_days":28,"pme_class":"Internal","program":"Integrated Front Office BU"},{"id":2831283,"title":"PME-504916 - UNITY: Unable to Access Knock via Unified Platform","severity":"2 - High","state":"Resolved","assigned":"Assigned","age_days":25,"pme_class":"External","program":"Integrated Front Office BU"},{"id":2831992,"title":"PME-504321 - Unable to open Guest Card--- An unknown error has occurred when loading this ","severity":"2 - High","state":"Ready To Work","assigned":"Unassigned","age_days":24,"pme_class":"External","program":"Integrated Front Office BU"},{"id":2832190,"title":"PME-503708 - floorplan images are randomly disappearing from our websites.","severity":"2 - High","state":"Active","assigned":"Assigned","age_days":24,"pme_class":"External","program":"Integrated Front Office BU"},{"id":2839451,"title":"PME-504889 - *P2* Knock form coming in as \"New Lead\" instead of lead name. Possible theme ","severity":"2 - High","state":"Active","assigned":"Assigned","age_days":19,"pme_class":"Internal","program":"Integrated Front Office BU"},{"id":2845875,"title":"PME-506771 - Core: Whoops Error When attempting to access lease summary page of tenant","severity":"2 - High","state":"Active","assigned":"Assigned","age_days":14,"pme_class":"External","program":"Screening Program"},{"id":2849276,"title":"P2 - PME-506880 - Lease Expirations Settings","severity":"2 - High","state":"Active","assigned":"Assigned","age_days":12,"pme_class":"External","program":"Leasing Program"}],"slow_resolved_table":[{"id":593820,"title":"PME-194808 - Pivotal Software Redis LUA < 3.2.12 / 4.0.x < 4.0.10 / 5.0 < 5.0rc2 Multiple ","severity":"3 - Medium","days":1687.3,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"},{"id":593823,"title":"PME-194814 - CentOS 7 : perl (CESA-2019:0109) - HIGH Risk Vulnerability","severity":"3 - Medium","days":1687.3,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"},{"id":593821,"title":"PME-194813 - CentOS 7 : PackageKit / accountsservice / adwaita-icon-theme / appstream-data","severity":"3 - Medium","days":1687.3,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"},{"id":593883,"title":"PME-194810 - Redis Server Unprotected by Password Authentication - HIGH Risk Vulnerability","severity":"3 - Medium","days":1687.2,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"},{"id":734005,"title":"P4: PME-210190 - CTAs in the nav do not have an option to open in a new tab on the Topaz t","severity":"4 - Low","days":1673.3,"program":"Marketing Suite Program","resolved_reason":"Fixed and verified"},{"id":737824,"title":"P4: SF: PME-209352 - Unit level amenities are not showing when selecting the available uni","severity":"4 - Low","days":1668.3,"program":"Marketing Suite Program","resolved_reason":"Fixed and verified"},{"id":850036,"title":"P4: SF: PME-225282 - add the Greystar footer to Savannah","severity":"3 - Medium","days":1571.4,"program":"Marketing Suite Program","resolved_reason":"Fixed and verified"},{"id":890507,"title":"PME-214423: Residents/Applicants Unable to Pay online","severity":"3 - Medium","days":1561.4,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"},{"id":895493,"title":"P4: PME-234281 - Hero image container text is not properly centered across all supported r","severity":"4 - Low","days":1528.3,"program":"Marketing Suite Program","resolved_reason":""},{"id":812996,"title":"P4: PME-222782 - Full Candian Postal Code is not fully syncing from OneSite to ActiveBuild","severity":"4 - Low","days":1512.2,"program":"Resident Portals Program","resolved_reason":"Fixed and verified"}],"pme_tag_priority":{"labels":["P1","P2","P3","P4"],"values":[15,306,2558,199]}};
+
+// ---- Theme constants ----
+const C = {
+  text:'#111827', dim:'#4b5563', faint:'#9ca3af', border:'#e0e4ea',
+  accent:'#0891b2', crit:'#dc2626', high:'#d97706', med:'#0891b2', low:'#6b7280',
+  good:'#16a34a', violet:'#7c3aed', pink:'#db2777', lime:'#4d7c0f', warn:'#ca8a04'
+};
+const PALETTE = [C.accent, C.high, C.violet, C.lime, C.pink, C.warn, C.good, C.crit, C.low, '#0ea5e9'];
+
+Chart.defaults.font.family = "'JetBrains Mono', monospace";
+Chart.defaults.font.size = 11;
+Chart.defaults.color = C.dim;
+Chart.defaults.borderColor = C.border;
+Chart.defaults.plugins.legend.labels.boxWidth = 10;
+Chart.defaults.plugins.legend.labels.boxHeight = 10;
+Chart.defaults.plugins.legend.labels.padding = 12;
+Chart.defaults.plugins.tooltip.backgroundColor = '#ffffff';
+Chart.defaults.plugins.tooltip.borderColor = '#e0e4ea';
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.tooltip.titleColor = '#111827';
+Chart.defaults.plugins.tooltip.bodyColor = '#4b5563';
+Chart.defaults.plugins.tooltip.titleFont = {family:"'JetBrains Mono', monospace", size: 11};
+Chart.defaults.plugins.tooltip.bodyFont  = {family:"'JetBrains Mono', monospace", size: 11};
+
+const gridOpts = { color: 'rgba(0,0,0,0.06)', drawBorder: false };
+const tickOpts = { color: C.faint, font: {size: 10} };
+
+const sevColor = (lbl) => {
+  if (/Critical/i.test(lbl)) return C.crit;
+  if (/High/i.test(lbl))     return C.high;
+  if (/Medium/i.test(lbl))   return C.med;
+  if (/Low/i.test(lbl))      return C.low;
+  return '#9ca3af';
+};
+
+// ---- Populate KPIs ----
+function fmt(n) { return n == null ? '—' : n.toLocaleString(); }
+const k = DATA.kpis;
+document.getElementById('kpi-total').textContent      = fmt(k.total);
+document.getElementById('kpi-closed').firstChild.nodeValue = fmt(k.closed);
+document.getElementById('kpi-closed-pct').textContent = ` · ${k.closed_pct}%`;
+document.getElementById('kpi-open').textContent       = fmt(k.open);
+document.getElementById('kpi-open-sub').textContent   = `not yet closed`;
+document.getElementById('kpi-crit').textContent       = fmt(k.critical);
+document.getElementById('kpi-high-sub').textContent   = `+ ${fmt(k.high)} High severity`;
+document.getElementById('kpi-median').firstChild.nodeValue = k.median_res_days;
+document.getElementById('kpi-cust').firstChild.nodeValue = fmt(k.customer_discovered);
+document.getElementById('kpi-cust-pct').textContent   = ` · ${k.customer_pct}%`;
+document.getElementById('kpi-escape').textContent     = fmt(k.escape_yes);
+document.getElementById('kpi-escape-sub').textContent = `~ ${k.escape_rate}% of classified escapes`;
+document.getElementById('kpi-oldest').firstChild.nodeValue = fmt(k.oldest_open_days);
+
+document.getElementById('meta-range').textContent     = `${k.date_min} → ${k.date_max}`;
+document.getElementById('meta-total').textContent     = fmt(k.total);
+document.getElementById('meta-now').textContent       = new Date().toISOString().slice(0,10);
+
+// ===== CHART HELPERS =====
+function lineChart(canvas, labels, datasets) {
+  return new Chart(document.getElementById(canvas), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: {intersect: false, mode: 'index'},
+      plugins: { legend: { position: 'top', align: 'end' } },
+      scales: {
+        x: { grid: gridOpts, ticks: { ...tickOpts, maxTicksLimit: 12, autoSkip: true } },
+        y: { grid: gridOpts, ticks: tickOpts, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function barChart(canvas, labels, datasets, opts={}) {
+  return new Chart(document.getElementById(canvas), {
+    type: 'bar',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: opts.horizontal ? 'y' : 'x',
+      plugins: { legend: { display: opts.legend ?? false } },
+      scales: {
+        x: { grid: gridOpts, ticks: { ...tickOpts, autoSkip: false } },
+        y: { grid: gridOpts, ticks: tickOpts, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function doughnutChart(canvas, labels, values, colors) {
+  return new Chart(document.getElementById(canvas), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: colors, borderColor: '#ffffff', borderWidth: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { padding: 8, font: {size: 10}, color: C.dim, boxWidth: 10, boxHeight: 10 }
+        }
+      }
+    }
+  });
+}
+
+// ===== 1. MONTHLY + YEARLY =====
+// Trim months to relevant range (where data exists)
+const ts = DATA.timeseries_monthly;
+const startIdx = ts.created.findIndex(v => v > 0);
+const labels = ts.labels.slice(startIdx);
+const created = ts.created.slice(startIdx);
+const closed  = ts.closed.slice(startIdx);
+lineChart('ch-monthly', labels, [
+  { label:'Created', data: created, borderColor: C.accent, backgroundColor: 'rgba(8,145,178,0.10)',
+    borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true },
+  { label:'Closed', data: closed, borderColor: C.high, backgroundColor: 'rgba(217,119,6,0.08)',
+    borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true },
+]);
+
+barChart('ch-yearly', DATA.timeseries_yearly.labels, [
+  { label:'Created', data: DATA.timeseries_yearly.created, backgroundColor: C.accent, borderWidth: 0 },
+  { label:'Closed',  data: DATA.timeseries_yearly.closed,  backgroundColor: C.high,   borderWidth: 0 },
+], {legend: true});
+
+// ===== 2. SEVERITY / PRIORITY / STATE =====
+const sevColors = DATA.severity.labels.map(sevColor);
+doughnutChart('ch-severity', DATA.severity.labels, DATA.severity.values, sevColors);
+
+const prioColors = DATA.priority.labels.map((l) => {
+  if (l === 'P1') return C.crit;
+  if (l === 'P2') return C.high;
+  if (l === 'P3') return C.med;
+  if (l === 'P4') return C.low;
+  return '#d1d5db';
+});
+doughnutChart('ch-priority', DATA.priority.labels, DATA.priority.values, prioColors);
+
+doughnutChart('ch-state', DATA.state.labels, DATA.state.values,
+  DATA.state.labels.map((l,i)=> /Closed/.test(l) ? C.low : PALETTE[i % PALETTE.length]));
+
+// ===== 3. RESOLUTION TIME =====
+barChart('ch-res-sev', DATA.res_by_severity.labels, [
+  { label:'Median days', data: DATA.res_by_severity.median,
+    backgroundColor: DATA.res_by_severity.labels.map(sevColor), borderWidth: 0 }
+]);
+
+new Chart(document.getElementById('ch-res-year'), {
+  type: 'line',
+  data: {
+    labels: DATA.res_by_year.labels,
+    datasets: [{
+      label: 'Median days',
+      data: DATA.res_by_year.median,
+      borderColor: C.accent,
+      backgroundColor: 'rgba(8,145,178,0.10)',
+      borderWidth: 2, pointBackgroundColor: C.accent, pointRadius: 4,
+      tension: 0.3, fill: true
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { x:{grid:gridOpts,ticks:tickOpts}, y:{grid:gridOpts,ticks:tickOpts,beginAtZero:true} }
+  }
+});
+
+barChart('ch-res-dist',
+  DATA.res_distribution.map(b=>b.label),
+  [{ data: DATA.res_distribution.map(b=>b.value),
+     backgroundColor: PALETTE, borderWidth: 0 }]
+);
+
+// ===== 4. PROGRAM HOT SPOTS =====
+const prog = DATA.program;
+// Sort by value desc, take top 12
+const sorted = prog.labels.map((l,i)=>({l, v:prog.values[i]}))
+  .filter(x=>x.l!=='Unspecified')
+  .sort((a,b)=>b.v-a.v).slice(0,12);
+barChart('ch-program', sorted.map(x=>x.l), [
+  { data: sorted.map(x=>x.v),
+    backgroundColor: sorted.map((_,i)=>PALETTE[i % PALETTE.length]),
+    borderWidth: 0 }
+], { horizontal: true });
+
+doughnutChart('ch-bu', DATA.business_unit.labels, DATA.business_unit.values,
+  [C.accent, C.violet, C.high]);
+
+// Heatmap
+(function renderHeatmap() {
+  const h = DATA.heatmap;
+  const container = document.getElementById('heatmap');
+  const maxVal = Math.max(...h.values.flat());
+  const cols = h.cols.length;
+  container.style.gridTemplateColumns = `220px repeat(${cols}, 1fr)`;
+  // Header row
+  const headerRow = document.createElement('div');
+  headerRow.className = 'heat-row';
+  headerRow.style.display = 'contents';
+  const blank = document.createElement('div');
+  blank.className = 'heat-header';
+  headerRow.appendChild(blank);
+  container.appendChild(blank);
+  h.cols.forEach(c => {
+    const cell = document.createElement('div');
+    cell.className = 'heat-header';
+    cell.textContent = c;
+    container.appendChild(cell);
+  });
+  h.rows.forEach((row, ri) => {
+    const lbl = document.createElement('div');
+    lbl.className = 'heat-label';
+    lbl.textContent = row.length > 30 ? row.slice(0,28)+'…' : row;
+    container.appendChild(lbl);
+    h.values[ri].forEach((v, ci) => {
+      const cell = document.createElement('div');
+      cell.className = 'heat-cell';
+      const ratio = v === 0 ? 0 : Math.log(v+1) / Math.log(maxVal+1);
+      const sevC = sevColor(h.cols[ci]);
+      cell.style.background = `${sevC}${Math.round(ratio * 200).toString(16).padStart(2,'0')}`;
+      cell.style.border = `1px solid ${sevC}22`;
+      cell.style.color = ratio > 0.45 ? '#ffffff' : '#111827';
+      cell.textContent = v;
+      cell.title = `${row} · ${h.cols[ci]}: ${v}`;
+      container.appendChild(cell);
+    });
+  });
+})();
+
+// ===== 5. RCA QUARTET =====
+function rcaBarChart(canvas, payload, color) {
+  barChart(canvas, payload.labels, [
+    { data: payload.values, backgroundColor: color, borderWidth: 0 }
+  ], { horizontal: true });
+}
+rcaBarChart('ch-rca',       DATA.rca,        C.accent);
+rcaBarChart('ch-devrca',    DATA.dev_rca,    C.high);
+rcaBarChart('ch-qarca',     DATA.qa_rca,     C.violet);
+rcaBarChart('ch-defectrca', DATA.defect_rca, C.lime);
+
+// ===== 6. PME CLASSIFICATION & CLIENTS =====
+doughnutChart('ch-pme-class', DATA.pme_class.labels, DATA.pme_class.values,
+  DATA.pme_class.labels.map(l => l==='External'?C.violet : l==='Internal'?C.lime : '#3a4150'));
+
+doughnutChart('ch-discovery', DATA.discovery.labels, DATA.discovery.values, PALETTE);
+doughnutChart('ch-env', DATA.environment.labels, DATA.environment.values,
+  DATA.environment.labels.map(l => /production/i.test(l) ? C.crit : PALETTE[0]));
+doughnutChart('ch-fixtype', DATA.fix_type.labels, DATA.fix_type.values, PALETTE);
+
+barChart('ch-clients', DATA.top_clients.labels, [
+  { data: DATA.top_clients.values,
+    backgroundColor: DATA.top_clients.labels.map((_,i)=>PALETTE[i%PALETTE.length]),
+    borderWidth: 0 }
+], { horizontal: true });
+
+// ===== 7. OPEN BACKLOG =====
+doughnutChart('ch-open-state',
+  DATA.open_backlog.state.labels, DATA.open_backlog.state.values, PALETTE);
+doughnutChart('ch-open-sev',
+  DATA.open_backlog.severity.labels, DATA.open_backlog.severity.values,
+  DATA.open_backlog.severity.labels.map(sevColor));
+barChart('ch-open-age',
+  DATA.open_backlog.age.map(b=>b.label),
+  [{ data: DATA.open_backlog.age.map(b=>b.value),
+     backgroundColor: DATA.open_backlog.age.map((b,i)=>{
+       if (/year/i.test(b.label) || /6-12/.test(b.label)) return C.crit;
+       if (/month/i.test(b.label)) return C.high;
+       return C.med;
+     }),
+     borderWidth: 0 }]
+);
+
+// Priority open table
+(function renderPriorityTable() {
+  const t = document.getElementById('tbl-priority-open');
+  t.innerHTML = `<thead><tr>
+    <th>ID</th><th>Title</th><th>Severity</th><th>State</th><th>Assigned</th><th>Program</th><th>Class</th><th>Age (d)</th>
+  </tr></thead><tbody>` +
+  DATA.priority_open_table.map(r => {
+    const sevCls = /Critical/i.test(r.severity) ? 'crit' : /High/i.test(r.severity) ? 'high' : 'med';
+    const pmeCls = r.pme_class==='External'?'ext':r.pme_class==='Internal'?'int':'low';
+    return `<tr>
+      <td class="id">${r.id}</td>
+      <td class="title">${escapeHtml(r.title)}</td>
+      <td><span class="badge ${sevCls}">${r.severity}</span></td>
+      <td>${escapeHtml(r.state)}</td>
+      <td>${escapeHtml(r.assigned)}</td>
+      <td>${escapeHtml(r.program||'—')}</td>
+      <td><span class="badge ${pmeCls}">${r.pme_class}</span></td>
+      <td>${r.age_days}</td>
+    </tr>`;
+  }).join('') + '</tbody>';
+})();
+
+// ===== 8. QUALITY SIGNALS =====
+doughnutChart('ch-escape', DATA.escape.labels, DATA.escape.values,
+  DATA.escape.labels.map(l => l==='Yes'?C.crit:C.good));
+doughnutChart('ch-resolved', DATA.resolved_reason.labels, DATA.resolved_reason.values, PALETTE);
+barChart('ch-pi', DATA.pi_distribution.labels, [
+  { data: DATA.pi_distribution.values,
+    backgroundColor: DATA.pi_distribution.labels.map((_,i)=>PALETTE[i%PALETTE.length]),
+    borderWidth: 0 }
+]);
+
+// Slow resolved table
+(function renderSlow() {
+  const t = document.getElementById('tbl-slow');
+  t.innerHTML = `<thead><tr>
+    <th>ID</th><th>Title</th><th>Severity</th><th>Program</th><th>Resolved Reason</th><th>Days Open</th>
+  </tr></thead><tbody>` +
+  DATA.slow_resolved_table.map(r => {
+    const sevCls = /Critical/i.test(r.severity) ? 'crit' : /High/i.test(r.severity) ? 'high' : /Medium/i.test(r.severity) ? 'med' : 'low';
+    return `<tr>
+      <td class="id">${r.id}</td>
+      <td class="title">${escapeHtml(r.title)}</td>
+      <td><span class="badge ${sevCls}">${r.severity}</span></td>
+      <td>${escapeHtml(r.program||'—')}</td>
+      <td>${escapeHtml(r.resolved_reason||'—')}</td>
+      <td>${r.days}</td>
+    </tr>`;
+  }).join('') + '</tbody>';
+})();
+
+function escapeHtml(s){return (s+'').replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);}
+</script>
+
+</body>
+</html>
